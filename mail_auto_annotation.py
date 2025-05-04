@@ -92,7 +92,7 @@ def parse_json_response(text):
                 return obj
             except json.JSONDecodeError:
                 parse_retries += 1
-                print(f"JSON解析リトライ失敗 ({parse_retries}/{max_parse_retries}): {text[:50]}...")
+                print(f"JSON解析リトライ失敗 ({parse_retries}/{max_parse_retries}): {text}...")
                 time.sleep(1)  # 短い待機
         
         # すべてのリトライが失敗した場合
@@ -123,7 +123,8 @@ def annotate():
     client = OpenAI(
         api_key=API_KEY,
         base_url=API_BASE,
-        timeout=REQUEST_TIMEOUT
+        timeout=REQUEST_TIMEOUT,
+        max_retries=0  # ライブラリ内部のリトライを無効化（独自のリトライロジックを使用するため）
     )
     
     # 処理対象のレコードを特定（未処理のもののみ）
@@ -172,7 +173,8 @@ def annotate():
                                     {"role": "user", "content": PROMPT_HEADER + body.strip()}
                                 ],
                                 temperature=0.0,
-                                max_tokens=60
+                                max_tokens=32768,
+                                stream=False  # ストリーミングを明示的に無効化
                             )
                             
                             # レスポンステキストを取得
