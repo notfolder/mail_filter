@@ -19,8 +19,8 @@ BATCH_SIZE      = 100  # チェックポイント保存間隔（処理件数）
 ERROR_WAIT_TIME = 10   # エラー発生時の待機秒数
 
 PROMPT_HEADER = """\
-Read the following email body and return an importance score (1–5) and the reason \
-(within 50 characters) in JSON format.
+Read the following email body and return an importance score (1–5), the reason (within 50 characters), \
+and your confidence in this classification (0.0–1.0) in JSON format.
 
 Classification criteria:
 * 5: Urgent + financial matters
@@ -30,7 +30,7 @@ Classification criteria:
 * 1: Spam, phishing, or unknown sender
 
 Output format (JSON only):
-{"importance":<1–5>,"reason":"<reason within 50 characters>"}
+{"importance":<1–5>,"reason":"<reason>","confidence":<0.0–1.0>}
 
 Email body:
 """
@@ -173,14 +173,19 @@ def annotate():
                         # すべてのリトライが失敗した場合
                         if not parse_success:
                             print(f"警告: JSON解析がすべて失敗しました: {text[:100]}...")
-                            obj = {"importance": -1, "reason": "JSONパース失敗"}
+                            obj = {
+                                "importance": -1, 
+                                "reason": "JSONパース失敗",
+                                "confidence": 0.0  # デフォルトのconfidence値を設定
+                            }
                     
                     # レコードの作成と書き込み
                     record = {
                         "message_id": message_id,
                         "email_body": body[:500] + ("..." if len(body) > 500 else ""),  # 長すぎるボディを切り詰め
                         "importance": obj.get("importance", 0),
-                        "reason": obj.get("reason", "不明")
+                        "reason": obj.get("reason", "不明"),
+                        "confidence": obj.get("confidence", 0.0)  # confidenceフィールドを追加
                     }
                     fout.write(json.dumps(record, ensure_ascii=False) + "\n")
                     fout.flush()  # 確実にディスクに書き込む
