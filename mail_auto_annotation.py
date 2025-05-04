@@ -23,10 +23,9 @@ CHECKPOINT_FILE = "annotation_checkpoint.json"
 # 処理設定
 BATCH_SIZE = 100  # チェックポイント保存間隔（処理件数）
 ERROR_WAIT_TIME = 10  # エラー発生時の待機秒数
-REQUEST_TIMEOUT = 120  # APIリクエストのタイムアウト時間（秒）
+REQUEST_TIMEOUT = 300 # APIリクエストのタイムアウト時間（秒）
 
 PROMPT_HEADER = """
-You may think internally, but do not output any <think> or </think> tags or their contents. Only provide the final answer in plain text.
 Read the following email body and return an importance score (1–5), the reason (within 50 characters), \
 and your confidence in this classification (0.0–1.0) in JSON format.
 
@@ -89,7 +88,8 @@ def parse_json_response(text):
                 
                 obj = json.loads(cleaned_text)
                 parse_success = True
-                print(f"JSON解析リトライ成功 ({parse_retries+1}回目)")
+                if parse_retries > 0:
+                    print(f"JSON解析リトライ成功 ({parse_retries+1}回目)")
                 return obj
             except json.JSONDecodeError:
                 parse_retries += 1
@@ -171,7 +171,7 @@ def annotate():
                                 model=MODEL_NAME,
                                 messages=[
                                     {"role": "system", "content": ""},
-                                    {"role": "user", "content": PROMPT_HEADER + body.strip()}
+                                    {"role": "user", "content": PROMPT_HEADER + body.strip()[:10000]}  # 本文の長さを制限
                                 ],
                                 temperature=0.0,
                                 max_tokens=32768,
