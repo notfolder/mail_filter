@@ -34,7 +34,7 @@ Read the following email body and return an importance score (1–5), the reason
 and your confidence in this classification (0.0–1.0) in JSON format.
 
 Classification criteria:
-* 5: Urgent + financial matters
+* 5: Urgent + financial matters or from human
 * 4: Urgent or financial matters
 * 3: Important but not urgent communication
 * 2: Informational or promotional content
