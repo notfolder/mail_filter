@@ -5,18 +5,25 @@ import os
 import time
 import json
 import pandas as pd
-import requests
 from tqdm import tqdm
 import sys
+from openai import OpenAI  # OpenAI公式ライブラリに変更
 
-# — 設定 —  
-LM_STUDIO_URL   = os.getenv("LM_STUDIO_URL", "http://127.0.0.1:1234")
-LM_STUDIO_MODEL = os.getenv("LM_STUDIO_MODEL", "qwen3-30b-a3b-mlx")
-INPUT_CSV       = "emails.csv"
-OUTPUT_JSONL    = "labeled_emails_lmstudio.jsonl"
+# — 設定 —
+# API設定（LM StudioまたはOpenAI）
+API_BASE = os.getenv("OPENAI_API_BASE", "http://127.0.0.1:1234/v1")  # LM StudioのAPI URLまたはOpenAIのURL
+API_KEY = os.getenv("OPENAI_API_KEY", "lm-studio")  # APIキー（LM Studioの場合は任意の値）
+MODEL_NAME = os.getenv("OPENAI_MODEL", "qwen3-30b-a3b-mlx")  # モデル名
+
+# ファイル設定
+INPUT_CSV = "emails.csv"
+OUTPUT_JSONL = "labeled_emails.jsonl"
 CHECKPOINT_FILE = "annotation_checkpoint.json"
-BATCH_SIZE      = 100  # チェックポイント保存間隔（処理件数）
-ERROR_WAIT_TIME = 10   # エラー発生時の待機秒数
+
+# 処理設定
+BATCH_SIZE = 100  # チェックポイント保存間隔（処理件数）
+ERROR_WAIT_TIME = 10  # エラー発生時の待機秒数
+REQUEST_TIMEOUT = 120  # APIリクエストのタイムアウト時間（秒）
 
 PROMPT_HEADER = """\
 Read the following email body and return an importance score (1–5), the reason (within 50 characters), \
@@ -57,6 +64,45 @@ def load_checkpoint():
             print(f"チェックポイントの読み込みに失敗しました: {e}")
     return set()
 
+def parse_json_response(text):
+    """JSONレスポンスをパースする関数（リトライロジック付き）"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # JSON解析エラー時のリトライ処理
+        parse_retries = 0
+        max_parse_retries = 3
+        parse_success = False
+        
+        while parse_retries < max_parse_retries:
+            try:
+                # 改行を削除して再試行
+                cleaned_text = text.replace("\n", "")
+                # 先頭と末尾の不要な文字を削除して再試行
+                cleaned_text = cleaned_text.strip('`').strip()
+                # JSONの前後にある不要なテキストを削除
+                if '{' in cleaned_text and '}' in cleaned_text:
+                    start_idx = cleaned_text.find('{')
+                    end_idx = cleaned_text.rfind('}') + 1
+                    cleaned_text = cleaned_text[start_idx:end_idx]
+                
+                obj = json.loads(cleaned_text)
+                parse_success = True
+                print(f"JSON解析リトライ成功 ({parse_retries+1}回目)")
+                return obj
+            except json.JSONDecodeError:
+                parse_retries += 1
+                print(f"JSON解析リトライ失敗 ({parse_retries}/{max_parse_retries}): {text[:50]}...")
+                time.sleep(1)  # 短い待機
+        
+        # すべてのリトライが失敗した場合
+        print(f"警告: JSON解析がすべて失敗しました: {text[:100]}...")
+        return {
+            "importance": -1, 
+            "reason": "JSONパース失敗",
+            "confidence": 0.0
+        }
+
 def annotate():
     # CSVの読み込み
     print(f"{INPUT_CSV} を読み込んでいます...")
@@ -73,9 +119,12 @@ def annotate():
     # 出力ファイルが存在しなければ新規作成、存在すれば追記モード
     file_mode = 'a' if os.path.exists(OUTPUT_JSONL) and processed_ids else 'w'
     
-    # APIエンドポイントの設定
-    endpoint = f"{LM_STUDIO_URL}/v1/chat/completions"
-    headers = {"Content-Type": "application/json"}
+    # OpenAIクライアントの初期化
+    client = OpenAI(
+        api_key=API_KEY,
+        base_url=API_BASE,
+        timeout=REQUEST_TIMEOUT
+    )
     
     # 処理対象のレコードを特定（未処理のもののみ）
     remaining_df = df[~df['message_id'].astype(str).isin(processed_ids)]
@@ -110,26 +159,27 @@ def annotate():
                         pbar.update(1)
                         continue
                     
-                    # API呼び出し
-                    payload = {
-                        "model": LM_STUDIO_MODEL,
-                        "messages": [
-                            {"role": "system", "content": ""},
-                            {"role": "user",   "content": PROMPT_HEADER + body.strip()}
-                        ],
-                        "temperature": 0.0,
-                        "max_tokens": 60
-                    }
-                    
-                    # リトライ機能付きAPIリクエスト
+                    # OpenAI API呼び出し（リトライ機能付き）
                     max_retries = 3
                     retry_count = 0
+                    
                     while retry_count < max_retries:
                         try:
-                            resp = requests.post(endpoint, headers=headers, json=payload, timeout=100)
-                            resp.raise_for_status()
+                            response = client.chat.completions.create(
+                                model=MODEL_NAME,
+                                messages=[
+                                    {"role": "system", "content": ""},
+                                    {"role": "user", "content": PROMPT_HEADER + body.strip()}
+                                ],
+                                temperature=0.0,
+                                max_tokens=60
+                            )
+                            
+                            # レスポンステキストを取得
+                            text = response.choices[0].message.content.strip()
                             break
-                        except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
+                            
+                        except Exception as e:
                             retry_count += 1
                             if retry_count >= max_retries:
                                 raise
@@ -137,47 +187,8 @@ def annotate():
                             print(f"API呼び出しエラー: {e}. {wait_time}秒後に再試行 ({retry_count}/{max_retries})")
                             time.sleep(wait_time)
                     
-                    data = resp.json()
-                    text = data["choices"][0]["message"]["content"].strip()
-                    
-                    # JSON形式にパース（エラーハンドリング付き）
-                    try:
-                        obj = json.loads(text)
-                    except json.JSONDecodeError:
-                        # JSON解析エラー時のリトライ処理
-                        parse_retries = 0
-                        max_parse_retries = 3
-                        parse_success = False
-                        
-                        while parse_retries < max_parse_retries:
-                            try:
-                                # 改行を削除して再試行
-                                cleaned_text = text.replace("\n", "")
-                                # 先頭と末尾の不要な文字を削除して再試行
-                                cleaned_text = cleaned_text.strip('`').strip()
-                                # JSONの前後にある不要なテキストを削除
-                                if '{' in cleaned_text and '}' in cleaned_text:
-                                    start_idx = cleaned_text.find('{')
-                                    end_idx = cleaned_text.rfind('}') + 1
-                                    cleaned_text = cleaned_text[start_idx:end_idx]
-                                
-                                obj = json.loads(cleaned_text)
-                                parse_success = True
-                                print(f"JSON解析リトライ成功 ({parse_retries+1}回目)")
-                                break
-                            except json.JSONDecodeError:
-                                parse_retries += 1
-                                print(f"JSON解析リトライ失敗 ({parse_retries}/{max_parse_retries}): {text[:50]}...")
-                                time.sleep(1)  # 短い待機
-                        
-                        # すべてのリトライが失敗した場合
-                        if not parse_success:
-                            print(f"警告: JSON解析がすべて失敗しました: {text[:100]}...")
-                            obj = {
-                                "importance": -1, 
-                                "reason": "JSONパース失敗",
-                                "confidence": 0.0  # デフォルトのconfidence値を設定
-                            }
+                    # JSONパース処理
+                    obj = parse_json_response(text)
                     
                     # レコードの作成と書き込み
                     record = {
@@ -185,7 +196,7 @@ def annotate():
                         "email_body": body[:500] + ("..." if len(body) > 500 else ""),  # 長すぎるボディを切り詰め
                         "importance": obj.get("importance", 0),
                         "reason": obj.get("reason", "不明"),
-                        "confidence": obj.get("confidence", 0.0)  # confidenceフィールドを追加
+                        "confidence": obj.get("confidence", 0.0)
                     }
                     fout.write(json.dumps(record, ensure_ascii=False) + "\n")
                     fout.flush()  # 確実にディスクに書き込む
