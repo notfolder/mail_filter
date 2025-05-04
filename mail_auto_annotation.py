@@ -13,7 +13,11 @@ from openai import OpenAI  # OpenAI公式ライブラリに変更
 # API設定（LM StudioまたはOpenAI）
 API_BASE = os.getenv("OPENAI_API_BASE", "http://127.0.0.1:1234/v1")  # LM StudioのAPI URLまたはOpenAIのURL
 API_KEY = os.getenv("OPENAI_API_KEY", "lm-studio")  # APIキー（LM Studioの場合は任意の値）
-MODEL_NAME = os.getenv("OPENAI_MODEL", "qwen3-30b-a3b-mlx")  # モデル名
+# MODEL_NAME = os.getenv("OPENAI_MODEL", "qwen3-30b-a3b-mlx")  # モデル名 23/it
+# MODEL_NAME = os.getenv("OPENAI_MODEL", "phi-4-mini-reasoning-mlx")  # モデル名 遅いNG
+# MODEL_NAME = os.getenv("OPENAI_MODEL", "phi-4-mini-instruct")  # モデル名 5ばかりNG
+# MODEL_NAME = os.getenv("OPENAI_MODEL", "llama-3.2-3b-instruct")  # モデル名 ちょっと間違える 17/it
+MODEL_NAME = os.getenv("OPENAI_MODEL", "gemma-3-text-1b-it-mlx")  # モデル名 結構良さげ 3/it
 
 # ファイル設定
 INPUT_CSV = "emails.csv"
@@ -34,7 +38,7 @@ Classification criteria:
 * 4: Urgent or financial matters
 * 3: Important but not urgent communication
 * 2: Informational or promotional content
-* 1: Spam, phishing, or unknown sender
+* 1: Spam, phishing,email newsletter, or unknown sender
 
 Output format (JSON only):
 {"importance":<1–5>,"reason":"<reason>","confidence":<0.0–1.0>}
