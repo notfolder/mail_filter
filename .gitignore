@@ -1,2 +1,5 @@
 .vscode
 emails.csv
+.DS_Store
+email_checkpoint.json
+input*.zip

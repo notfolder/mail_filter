@@ -230,7 +230,6 @@ def process_mbox_file(mbox_path, processed_count=0):
                 # バッチ間に短い休止を入れる
                 if batch_start < total_count:
                     print("次のバッチ処理のために5秒間休止します...")
-                    time.sleep(5)
                 
             except Exception as e:
                 print(f"バッチ処理中にエラーが発生しました: {e}")
