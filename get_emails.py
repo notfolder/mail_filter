@@ -1,91 +1,71 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
-import random
-import pickle
-import pandas as pd
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-import base64
+import imaplib, base64, random, os, sys
 from email import message_from_bytes
-import io
+import pandas as pd
+from tqdm import tqdm  # 進捗表示のためのライブラリを追加
 
-# OAuth 2.0認証の設定
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-NUM_SAMPLES = 50  # 抽出するメール件数
-
-def get_gmail_service():
-    """Gmail APIのサービスオブジェクトを取得する"""
-    creds = None
-    # トークンがあれば読み込む
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
-    
-    # 有効な認証情報がなければ新たに取得
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # client_secrets.jsonは、Google Cloud ConsoleからダウンロードしたOAuth 2.0クライアント情報
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'client_secrets.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        
-        # 次回のために認証情報を保存
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
-    
-    return build('gmail', 'v1', credentials=creds)
+# 環境変数から認証情報を取得（環境変数がない場合はデフォルト値を使用）
+GMAIL_USER = os.environ.get('GMAIL_USER', 'notfolder@gmail.com')
+APP_PASSWORD = os.environ.get('GMAIL_APP_PASSWORD', 'your_app_password')
+NUM_SAMPLES = 100000  # 抽出するメール件数
 
 def main():
-    # Gmail APIサービスの取得
-    service = get_gmail_service()
-    
+    # 1) IMAP 接続
     try:
-        # 1) メッセージIDのリストを取得
-        results = service.users().messages().list(userId='me', maxResults=500).execute()
-        messages = results.get('messages', [])
-        
-        if not messages:
-            print('No messages found.')
-            return
-        
-        # 2) ランダムにメッセージを選択
-        sampled_messages = random.sample(messages, min(NUM_SAMPLES, len(messages)))
-        
-        # 3) メッセージの内容を取得してデコード
+        print("Gmailに接続しています...")
+        imap = imaplib.IMAP4_SSL('imap.gmail.com', 993)
+        imap.login(GMAIL_USER, APP_PASSWORD)
+        imap.select('INBOX')
+        print("接続成功しました")
+    except imaplib.IMAP4.error as e:
+        print(f"認証エラー: {e}")
+        print("環境変数が設定されていない場合は、以下のコマンドで設定してください:")
+        print("export GMAIL_USER='yourname@gmail.com'")
+        print("export GMAIL_APP_PASSWORD='your_app_password'")
+        sys.exit(1)
+
+    try:
+        # 2) メッセージ ID 取得 → ランダム抽出
+        print("メールIDを取得しています...")
+        status, data = imap.search(None, 'ALL')
+        all_ids = data[0].split()
+        print(f"合計 {len(all_ids)} 件のメールから {min(NUM_SAMPLES, len(all_ids))} 件をランダム抽出します")
+        sampled_ids = random.sample(all_ids, min(NUM_SAMPLES, len(all_ids)))
+
+        # 3) 本文フェッチ & デコード
         records = []
-        for message in sampled_messages:
-            msg_id = message['id']
-            msg = service.users().messages().get(userId='me', id=msg_id, format='raw').execute()
-            
-            # Base64 URLエンコードされたメッセージをデコード
-            msg_bytes = base64.urlsafe_b64decode(msg['raw'])
-            mime_msg = message_from_bytes(msg_bytes)
-            
+        # tqdmで進捗バーを表示
+        for msg_id in tqdm(sampled_ids, desc="メール取得中", unit="件"):
+            _, msg_data = imap.fetch(msg_id, '(RFC822)')
+            raw = msg_data[0][1]
+            msg = message_from_bytes(raw)
             # プレーンテキスト部抽出
-            if mime_msg.is_multipart():
-                for part in mime_msg.walk():
+            if msg.is_multipart():
+                for part in msg.walk():
                     if part.get_content_type() == 'text/plain':
                         body = part.get_payload(decode=True).decode(part.get_content_charset() or 'utf-8', errors='ignore')
                         break
                 else:
                     body = ""  # プレーンテキストが見つからない場合
             else:
-                body = mime_msg.get_payload(decode=True).decode(mime_msg.get_content_charset() or 'utf-8', errors='ignore')
-            
-            records.append({'message_id': msg_id, 'body': body})
-        
-        # 4) CSV保存
+                body = msg.get_payload(decode=True).decode(msg.get_content_charset() or 'utf-8', errors='ignore')
+            records.append({'message_id': msg_id.decode(), 'body': body})
+
+        # 4) CSV 保存
+        print("CSVファイルに保存しています...")
         df = pd.DataFrame(records)
         df.to_csv('emails.csv', index=False, encoding='utf-8')
         print(f"Saved {len(records)} emails to emails.csv")
-    
+
     except Exception as e:
         print(f"エラーが発生しました: {e}")
+    finally:
+        # 5) クリーンアップ
+        print("接続をクローズしています...")
+        imap.close()
+        imap.logout()
 
 if __name__ == '__main__':
     main()
