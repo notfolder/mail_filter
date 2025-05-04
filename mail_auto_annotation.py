@@ -25,7 +25,8 @@ BATCH_SIZE = 100  # チェックポイント保存間隔（処理件数）
 ERROR_WAIT_TIME = 10  # エラー発生時の待機秒数
 REQUEST_TIMEOUT = 120  # APIリクエストのタイムアウト時間（秒）
 
-PROMPT_HEADER = """\
+PROMPT_HEADER = """
+You may think internally, but do not output any <think> or </think> tags or their contents. Only provide the final answer in plain text.
 Read the following email body and return an importance score (1–5), the reason (within 50 characters), \
 and your confidence in this classification (0.0–1.0) in JSON format.
 
@@ -195,7 +196,7 @@ def annotate():
                     # レコードの作成と書き込み
                     record = {
                         "message_id": message_id,
-                        "email_body": body[:500] + ("..." if len(body) > 500 else ""),  # 長すぎるボディを切り詰め
+                        "email_body": body,
                         "importance": obj.get("importance", 0),
                         "reason": obj.get("reason", "不明"),
                         "confidence": obj.get("confidence", 0.0)
