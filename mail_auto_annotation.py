@@ -126,7 +126,7 @@ def annotate():
                     retry_count = 0
                     while retry_count < max_retries:
                         try:
-                            resp = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+                            resp = requests.post(endpoint, headers=headers, json=payload, timeout=100)
                             resp.raise_for_status()
                             break
                         except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
@@ -144,13 +144,36 @@ def annotate():
                     try:
                         obj = json.loads(text)
                     except json.JSONDecodeError:
-                        try:
-                            # 改行を削除して再試行
-                            obj = json.loads(text.replace("\n", ""))
-                        except json.JSONDecodeError:
-                            # JSON解析に失敗した場合はデフォルト値を設定
-                            print(f"警告: JSON解析エラー: {text[:50]}...")
-                            obj = {"importance": 0, "reason": "解析エラー"}
+                        # JSON解析エラー時のリトライ処理
+                        parse_retries = 0
+                        max_parse_retries = 3
+                        parse_success = False
+                        
+                        while parse_retries < max_parse_retries:
+                            try:
+                                # 改行を削除して再試行
+                                cleaned_text = text.replace("\n", "")
+                                # 先頭と末尾の不要な文字を削除して再試行
+                                cleaned_text = cleaned_text.strip('`').strip()
+                                # JSONの前後にある不要なテキストを削除
+                                if '{' in cleaned_text and '}' in cleaned_text:
+                                    start_idx = cleaned_text.find('{')
+                                    end_idx = cleaned_text.rfind('}') + 1
+                                    cleaned_text = cleaned_text[start_idx:end_idx]
+                                
+                                obj = json.loads(cleaned_text)
+                                parse_success = True
+                                print(f"JSON解析リトライ成功 ({parse_retries+1}回目)")
+                                break
+                            except json.JSONDecodeError:
+                                parse_retries += 1
+                                print(f"JSON解析リトライ失敗 ({parse_retries}/{max_parse_retries}): {text[:50]}...")
+                                time.sleep(1)  # 短い待機
+                        
+                        # すべてのリトライが失敗した場合
+                        if not parse_success:
+                            print(f"警告: JSON解析がすべて失敗しました: {text[:100]}...")
+                            obj = {"importance": -1, "reason": "JSONパース失敗"}
                     
                     # レコードの作成と書き込み
                     record = {
