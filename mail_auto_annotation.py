@@ -17,7 +17,8 @@ API_KEY = os.getenv("OPENAI_API_KEY", "lm-studio")  # APIキー（LM Studioの�
 # MODEL_NAME = os.getenv("OPENAI_MODEL", "phi-4-mini-reasoning-mlx")  # モデル名 遅いNG
 # MODEL_NAME = os.getenv("OPENAI_MODEL", "phi-4-mini-instruct")  # モデル名 5ばかりNG
 # MODEL_NAME = os.getenv("OPENAI_MODEL", "llama-3.2-3b-instruct")  # モデル名 ちょっと間違える 17/it
-MODEL_NAME = os.getenv("OPENAI_MODEL", "gemma-3-text-1b-it-mlx")  # モデル名 結構良さげ 3/it
+# MODEL_NAME = os.getenv("OPENAI_MODEL", "gemma-3-text-1b-it-mlx")  # モデル名 8割4にしてしまう 3/it
+MODEL_NAME = os.getenv("OPENAI_MODEL", "google-gemma-2-2b-jpn-it-mlx")  # モデル名 8/it
 
 # ファイル設定
 INPUT_CSV = "emails.csv"
@@ -26,7 +27,7 @@ CHECKPOINT_FILE = "annotation_checkpoint.json"
 
 # 処理設定
 BATCH_SIZE = 100  # チェックポイント保存間隔（処理件数）
-ERROR_WAIT_TIME = 10  # エラー発生時の待機秒数
+ERROR_WAIT_TIME = 0.1  # エラー発生時の待機秒数
 REQUEST_TIMEOUT = 300 # APIリクエストのタイムアウト時間（秒）
 
 PROMPT_HEADER = """
@@ -98,7 +99,7 @@ def parse_json_response(text):
             except json.JSONDecodeError:
                 parse_retries += 1
                 print(f"JSON解析リトライ失敗 ({parse_retries}/{max_parse_retries}): {text}...")
-                time.sleep(1)  # 短い待機
+                # time.sleep(1)  # 短い待機
         
         # すべてのリトライが失敗した場合
         print(f"警告: JSON解析がすべて失敗しました: {text[:100]}...")
@@ -175,7 +176,7 @@ def annotate():
                                 model=MODEL_NAME,
                                 messages=[
                                     {"role": "system", "content": ""},
-                                    {"role": "user", "content": PROMPT_HEADER + body.strip()[:10000]}  # 本文の長さを制限
+                                    {"role": "user", "content": PROMPT_HEADER + body.strip()[:7000]}  # 本文の長さを制限
                                 ],
                                 temperature=0.0,
                                 max_tokens=32768,
@@ -192,7 +193,7 @@ def annotate():
                                 raise
                             wait_time = ERROR_WAIT_TIME * retry_count
                             print(f"API呼び出しエラー: {e}. {wait_time}秒後に再試行 ({retry_count}/{max_retries})")
-                            time.sleep(wait_time)
+                            # time.sleep(wait_time)
                     
                     # JSONパース処理
                     obj = parse_json_response(text)
@@ -224,12 +225,12 @@ def annotate():
                         batch_counter = 0
                     
                     # APIのレート制限対策に短い待機を入れる（必要に応じて調整）
-                    time.sleep(0.1)
+                    # time.sleep(0.1)
                     
                 except Exception as e:
                     print(f"\nエラー発生 (message_id={row.get('message_id', 'unknown')}): {e}")
                     print(f"{ERROR_WAIT_TIME}秒後に次のメールの処理を続行します...")
-                    time.sleep(ERROR_WAIT_TIME)
+                    # time.sleep(ERROR_WAIT_TIME)
                     pbar.update(1)
     
     # 最終チェックポイントの保存
